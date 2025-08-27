@@ -1,0 +1,94 @@
+#include  "prelab5_bsp.h"
+
+            MODULE BSP
+            PUBLIC GPIOconfig,TIMERconfig,ADCconfig
+            EXTERN main,PBs_handler,TAX_ISR,TA1_ISR,T1A0_ISR
+            
+            RSEG   CODE                    
+;-----------------------------------------------------------------------------  
+;           GPIO congiguration
+;-----------------------------------------------------------------------------
+GPIOconfig 
+             mov.w   #WDTPW+WDTHOLD,&WDTCTL   ; hold watchdog timer
+            ; PushButtons Setup
+             bic.b   #0xff,PBsArrPortSel
+             bic.b   #0x0f,PBsArrPortDir
+             bis.b   #0x80,PBsArrPortDir
+             
+             bic.b   #0xff,PBsArrPortout
+             
+             bis.b   #0x03,PBsArrIntEdgeSel ; pull-up 
+             bic.b   #0x0c,PBsArrIntEdgeSel ; pull-down
+             bis.b   #0x0f,PBsArrIntEn      ;---check
+             bic.b   #0xff,PBsArrIntPend    ; clear pending interrupts
+             
+             ;------------------------------------------
+              ;Switches Setup
+             bic.b   #0x70,SWsArrPortSel
+             bic.b   #0x70,SWsArrPortDir
+             
+             ;------------------------------------------
+             ; LEDs Setup
+             bic.b   #0xFF,LEDsArrPortSel ; GPIO capability
+             bis.b   #0xFF,LEDsArrPortDir ; output dir
+             clr.b   LEDsArrPort    ; clear LEDs
+
+             ;  LCD CONFIG
+             bic.b   #0xE0,PBsArrPortSel ;P2.5-7 SET TO I/O    
+             bis.b   #0xE0,PBsArrPortDir ;P2.5-7 SET TO OUTPUT (lcd controls)
+             bic.b   #0xFF,LCDArrPort       
+             bic.b   #0xFF,LCDArrSel     ;set p1 to be i/o
+             bis.b   #0xFF,LCDArrDir     ;p1 need to be output
+             bic.b   #0xE0,LCDArrCont    ;E=0,RS=0, R/W=0
+             
+             ;   osc input
+              bis.b   #0x10,PBsArrPortSel ;P2.4 SET TO 
+              bic.b   #0x10,&P2SEL2 ;P2.4 SET TO 
+              bic.b   #0x10,PBsArrPortDir ;P2.4 SET TO INPUT (lcd controls)
+              
+              ;------------------------------------
+              ;smclk_freq_check_(delete later)
+              ;bis.b   #0x10,LCDArrSel    
+              ;bis.b   #0x10,LCDArrDir
+              ;-----------------------------------
+             
+             ret
+;------------------------------------------------------------------------------------- 
+;            Timers congiguration 
+;-------------------------------------------------------------------------------------
+TIMERconfig 
+            bis  #TASSEL_2+ID_3+MC_0+TAIE,&TACTL ;setup for state1
+            bis  #TACLR,&TACTL 
+            mov  #0xFFFF,TACCR0 
+            
+          
+            
+            mov.w #TASSEL_2+ID_3+MC_0+TACLR, &TA1CTL
+            mov  #0xFFFF,TA1CCR0
+            clr.w &TA1R             ;resetting the timer value 
+           
+            
+            ret
+;-------------------------------------------------------------------------------------- 
+;            ADC congiguration 
+;--------------------------------------------------------------------------------------
+ADCconfig
+            nop ; write here ADC congiguration code
+            
+            ret
+;---------------------------------------------------------------------------------------                  
+             COMMON  INTVEC   ; Interrupt Vectors-Begins a common segment name of INTVEC 
+;--------------------------------------------------------------------------------------
+             ORG     PORT2_VECTOR       ;PORT2 Interrupt Vector
+             DW      PBs_handler        ; interrupt handler = ISR
+             ORG     RESET_VECTOR       ; MSP430 RESET Vector
+             DW      main
+             ORG     TIMER0_A1_VECTOR          ; Timer_a0 Vector
+             DW      TAX_ISR
+             ORG     TIMER1_A1_VECTOR
+             DW      TA1_ISR
+             ORG     TIMER1_A0_VECTOR
+             DW      T1A0_ISR
+            
+             ENDMOD
+             END

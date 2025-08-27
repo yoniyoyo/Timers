@@ -1,0 +1,303 @@
+#include  "prelab5_bsp.h"
+
+              MODULE HAL
+              PUBLIC SysConfig,,PBs_handler,delay,Delay500msec,LCDsetup,Lcd_strobe,TAX_ISR,startCLK_A0,stopCLK_A0,clr_lcd;SetupBT
+              PUBLIC TA1_ISR,startCLK_A1,T1A0_ISR,stopCLK_A1
+              EXTERN GPIOconfig,TIMERconfig,ADCconfig,state0,st01_cntdwn,rem,delta
+              EXTERN state,st02,prev_TA1CCR2,prntscrn_hz,flag_1,division_result,buffer,DIV16,dec_converter,prntscrn_hz
+;-----------------------------------------------------------------------------  
+;           LCD commands Macro
+;-----------------------------------------------------------------------------           
+Lcd_cmd       MACRO command
+              push  #delay15ms
+              call  #delay
+              mov.b command,LCDArrPort
+              call  #Lcd_strobe
+              ENDM    
+;-------------------------------------------------------------           
+;            LCD ascii data macro
+;-------------------------------------------------------------            
+Lcd_data     MACRO    char
+             push     #delay5ms
+             call     #delay
+             ;bic.b    #0xE0,LCDArrCont
+             mov.b    #0x00,LCDArrPort   ;0 -> DATABYTE
+             bis.b    #RS,LCDArrCont    ;RS=1
+             mov.b    char,LCDArrPort  ;CHAR -> DATABYTE
+             call     #Lcd_strobe
+             bic.b    #RS,LCDArrCont    ;RS=0
+             ENDM
+;-------------------------------------------------------------           
+;             print digit to LCD  macro
+;-------------------------------------------------------------
+
+         
+              RSEG   CODE
+              
+              
+              
+              
+              
+;SetupFLL      bis.b #XCAP14PF,&FLL_CTL0 ; Configure load caps
+;OFIFGcheck    bic.b #OFIFG,&IFG1 ; Clear OFIFG
+;              mov.w #047FFh,R15 ; Wait for OFIFG to set again if
+;OFIFGwait     dec.w R15 ; not stable yet
+ ;             jnz OFIFGwait
+ ;             bit.b #OFIFG,&IFG1 ; Has it set again?
+ ;             jnz OFIFGcheck ; If so, wait some more
+                        
+
+;----------------------------------------------------------------------------
+;             LCD SETUP
+;----------------------------------------------------------------------------
+LCDsetup     bic.b   0xE0, LCDArrCont             
+             push    #delay15ms
+             call    #delay
+             mov.b   #0x3f,LCDArrPort
+             call    #Lcd_strobe
+             push    #delay5ms
+             call    #delay
+             mov.b   #0x3f,LCDArrPort
+             call    #Lcd_strobe             
+             push    #delay200us
+             call    #delay
+             mov.b   #0x3f,LCDArrPort
+             call    #Lcd_strobe 
+             Lcd_cmd #0x3C
+             Lcd_cmd #0x0F
+             Lcd_cmd #0x01
+             Lcd_cmd #0x06
+             Lcd_cmd #0x80
+             Lcd_cmd #0x02
+             CLR.B   countSecO
+             CLR.B   countSecT
+             CLR.B   countMinO
+             clr.b   COMBINER
+             call  #clr_lcd
+             ret
+             
+;-------------------------------------------------------------           
+;             LCD strobe routine 
+;-------------------------------------------------------------
+Lcd_strobe   bis.b  #E,LCDArrCont
+             NOP
+             NOP
+             bic.b  #E,LCDArrCont
+             ret
+;-------------------------------------------------------------           
+;             clear lcd 
+;-------------------------------------------------------------
+clr_lcd      Lcd_cmd #0x01
+             ret
+                                
+;--------------------------------------------------------------------
+;             System Configuration  
+;--------------------------------------------------------------------
+SysConfig     call #GPIOconfig
+              call #TIMERconfig
+              call #ADCconfig
+              ;call #SetupFLL
+              ret
+ 
+                
+;----------------------------------------------------------------------- 
+;            PORT2 Interrupt Service Routine
+;-----------------------------------------------------------------------
+PBs_handler  push.w #debounceVal
+             call   #delay
+             
+             call   #stopCLK_A0
+             call   #stopCLK_A1
+             
+             bit.b  #PB0,PBsArrIntPend   ;check if PB0 is pushed
+             jnz    PB0sel 
+             bit.b  #PB1,PBsArrIntPend   ;check if PB1 is pushed
+             jnz    PB1sel
+             bit.b  #PB2,PBsArrIntPend   ;check if PB2 is pushed
+             jnz    PB2sel
+             bit.b  #PB3,PBsArrIntPend   ;check if PB3 is pushed
+             jnz    PB3sel
+             reti                ; interrupt hapened from another source
+             
+PB0sel       mov    #1,state 
+             mov    #PB0,R4     ; which IntPend to clear
+             jmp    exitLPM0
+PB1sel       mov    #2,state
+             mov    #PB1,R4     ; which IntPend to clear
+             jmp    exitLPM0
+PB2sel       mov    #3,state    ; idle state
+             mov    #PB2,R4     ; which IntPend to clear
+             jmp    exitLPM0
+             
+PB3sel       mov    #4,state
+             mov    #PB3,R4     ; which IntPend to clear
+             
+
+exitLPM0     bic    #CPUOFF+GIE,0(SP)  ; Exit LMP0, disable gie
+             bic.b  R4,PBsArrIntPend
+             
+            
+             bic.b    #10000000b,PBsArrPortout
+             pop    R7
+             POP    R8
+             PUSH.W #state0
+             PUSH.W R7
+             
+             reti
+;----------------------------------------------------------------------------------------------
+;            Polling based Delay function
+;----------------------------------------------------------------------------------------------                     
+delay        pop   R15        ; save return address
+             pop   R5        ; get delay value
+             
+L            dec.w   R5      ;function body begin                 
+             jnz     L       ;function body end
+             
+             push.w  R15
+             ret
+             
+Delay500msec    pop     R4       ; save return address
+                mov.w   #6,R14              
+L2              mov     #29115, R5
+L3              dec.w   R5      ;function body begin                 
+                jnz     L3      ;function body end 
+                dec     R14
+                jnz     L2
+                push    R4       ; push return address
+                ret                  
+                
+;-------------------------------------------------------------           
+;             set timer A0 
+;-------------------------------------------------------------
+startCLK_A0:
+             
+            bis #TACLR, &TACTL
+            bis #MC_3, &TACTL
+            bis  #TAIE,&TACTL ;setup for state1
+            ret
+;-------------------------------------------------------------           
+;             stop timer A0 
+;-------------------------------------------------------------
+stopCLK_A0: 
+        
+          
+            bic #MC_1, &TACTL
+            bic #TAIE,&TACTL
+           
+            ret
+            
+;-------------------------------------------------------------           
+;             set timer A1
+;-------------------------------------------------------------
+startCLK_A1: 
+             
+            bis #TACLR, &TA1CTL
+            bis.w #MC_3, &TA1CTL
+            ;mov #0, TA1CCR2
+            mov    #0 ,TA1R
+            bis #TAIE,&TA1CTL 
+            mov.w #CCIS_0+CM_1+CAP+CCIE+SCS,&TA1CCTL2
+            
+            ret
+            
+;-------------------------------------------------------------           
+;             stop timer A1 
+;-------------------------------------------------------------
+stopCLK_A1: 
+        
+            mov.w #TASSEL_2+ID_3+MC_0+TACLR, &TA1CTL
+            ;bic #MC_2, &TA1CTL
+            bic #CCIE, &TA1CCTL2
+           
+            ret            
+;-------------------------------------------------------------------------------------------------------------------------------
+TAX_ISR: 
+;-------------------------------------------------------------------------------------------------------------------------------
+           add.w &TA0IV,PC ; Add Timer_ offset vector 
+           reti
+           reti       ;ccIFG1
+           reti       ;ccIFG2
+           reti       ;reserved int.       
+           reti       ;reserved int.
+TA_over    call #st01_cntdwn
+           
+ reti ; Return from overflow ISR
+           
+ 
+
+;-------------------------------------------------------------------------------------------------------------------------------
+TA1_ISR:
+;------------------------------------------------------------------------------------------------------------- 
+          cmp  #0x04,TA1IV                         ; Add Timer_A offset vector - I NEED TO CHECK IF THE NOP IS NEEDED HERE
+          jz   dy6
+          
+          jmp    TA1_over
+          reti
+        
+          
+dy6       mov buffer, R6
+          inc R6
+          mov R6, buffer
+          
+          
+          reti
+          
+TA1_over   
+          
+          mov buffer, R6  ;save freq m s 
+          
+          ;mov R6,R7
+          ;mov rem,R8
+          ;sub R8,R7
+          
+          ;cmp #1,R7
+          ;jge c2
+          
+          ;cmp #-1,R7
+          ;jl c2
+          
+         ;jmp endta1
+         
+         
+         
+         
+c2        mov R6,rem
+          push r6
+          call #st02
+          
+endta1   mov.w #0 , buffer
+         bis #TACLR, &TA1CTL
+         
+           
+           
+          reti
+          reti
+          reti
+          reti                          
+          reti
+          reti
+          reti  
+             reti
+ 
+ 
+
+ 
+;-------------------------------------------------------------------------------------------------------------------------------
+ T1A0_ISR:
+;-------------------------------------------------------------------------------------------------------------                            
+           add.w &TA0IV,PC ; Add Timer_ offset vector 
+           reti
+           reti       ;ccIFG1
+           reti       ;ccIFG2
+           reti       ;reserved int.       
+           reti       ;reserved int.
+
+           
+ reti ; Return from overflow ISR
+
+ 
+      ENDMOD
+           END     
+
+
+ 

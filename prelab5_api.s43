@@ -1,0 +1,359 @@
+#include  "prelab5_bsp.h"
+
+             MODULE API
+             PUBLIC st01_cntdwn,st02
+             EXTERN Print2LEDs,ReadSWs,Delay500msec ,Rising_leds_state,Rotating_leds_state,state,delay,Lcd_strobe,startCLK_A0,stopCLK_A0,clr_lcd
+             EXTERN rem,division_result,prev_TA1CCR2,mult_res,delta,buffer
+             PUBLIC prntscrn_0100,prntscrn_mfreq,prntscrn_hz,DIV16,dec_converter,prntscrn_hz
+             EXTERN   thounsands10,thounsands,hundreds,tens ,ones ,hexnum
+             
+             
+;-----------------------------------------------------------------------------  
+;           LCD commands Macro
+;-----------------------------------------------------------------------------           
+Lcd_cmd      MACRO command
+             push  #delay5ms
+             call  #delay
+             mov.b command,LCDArrPort     ;COMM -> DATABYTE
+             call  #Lcd_strobe
+             ENDM    
+                       
+;-------------------------------------------------------------           
+;            LCD ascii data macro
+;-------------------------------------------------------------            
+Lcd_data     MACRO    char
+             push     #delay5ms
+             call     #delay
+             mov.b    #0x00,LCDArrPort   ;0 -> DATABYTE
+             bis.b    #RS,LCDArrCont    ;RS=1
+             push     #delay5ms
+             call     #delay
+             mov.b    char,LCDArrPort  ;CHAR -> DATABYTE
+             call     #Lcd_strobe
+             bic.b    #RS,LCDArrCont    ;RS=0
+             ENDM
+;-------------------------------------------------------------           
+;             print digit to LCD  macro
+;-------------------------------------------------------------
+Lcd_digit  MACRO   digit
+           LOCAL LE9,greatA,finish
+           mov.b digit,R11   ;pop digit counter
+           cmp.b #0x0A,R11
+           jge   greatA
+           
+LE9        add.b #0x30,R11  ;if the digit is less than A
+           Lcd_data R11
+           jmp finish
+                       
+greatA     add.b #0x37,R11  ;if the digit is GE than A
+           Lcd_data R11
+           
+finish     ENDM
+
+             RSEG   CODE
+           
+;-----------------------------------------------------------------------------  
+;           print_timer_on_screen
+;-----------------------------------------------------------------------------            
+print_timer_on_screen:
+                
+                clr R11
+                clr R10
+                add #30h, R11
+                add #30h, R10
+                add countSecO ,R11
+                add countSecT, R10
+            
+                Lcd_cmd   #0x0C
+                Lcd_cmd   #0x01
+                Lcd_cmd   #0x02
+                Lcd_data  #0x30    ;print '0'
+                Lcd_data  #0x30    ;print '0'
+                Lcd_data  #0x3A    ;print ':'
+                Lcd_data  R10   
+                Lcd_data  R11   
+             
+                 ret
+            
+         
+;------------------------------------------------------------- 
+;            print screen 01:00
+;-------------------------------------------------------------
+
+prntscrn_0100:
+                 
+           ;--print screen 01:00--        
+           Lcd_cmd   #0x0C
+           Lcd_cmd   #0x01
+           Lcd_cmd   #0x02
+           Lcd_data  #0x30    ;print '0'
+           Lcd_data  #0x31    ;print '1'
+           Lcd_data  #0x3A    ;print ':'
+           Lcd_data  #0x30    ;print '0'
+           Lcd_data  #0x30    ;print '0'
+           Lcd_cmd   #0xC0
+           ;Lcd_data  #0x41
+           
+           ;---------------------------   
+           
+           mov #10,countSecO
+           mov #5 ,countSecT
+           
+           ret
+           
+           
+;------------------------------------------------------------- 
+;            print screen hz
+;-------------------------------------------------------------
+
+prntscrn_hz:           
+           
+           
+          ;Lcd_cmd   #0xc0
+          ;Lcd_cmd   #0xc0
+          ;Lcd_cmd   #0x01
+          Lcd_cmd   #0x02
+          Lcd_cmd   #0xC0
+          Lcd_cmd   #0x0F
+          Lcd_data  thounsands10
+          Lcd_data  thounsands
+          Lcd_data  hundreds
+          Lcd_data  tens 
+          Lcd_data  ones
+          Lcd_data  #0X20
+          Lcd_data  #0X48
+          Lcd_data  #0X7A
+          ret
+;-------------------------------------------------------------           
+;            state 01 func
+;-------------------------------------------------------------
+
+st01_cntdwn:      
+        
+           cmp #0, countSecO
+           jz sec_eq_0
+           dec     countSecO
+           jmp     prnt
+sec_eq_0   cmp #0, countSecT
+           jz  finish_count
+           dec     countSecT
+           mov #9  ,countSecO
+           
+prnt       call #print_timer_on_screen
+           ret
+
+finish_count:        
+           mov  #0, state
+           call #stopCLK_A0
+           call  #clr_lcd
+            ret
+;-------------------------------------------------------------           
+;            state 02 func
+;-------------------------------------------------------------
+st02:
+
+          pop   R4  ;addr
+          pop   R6  ;freq count - lo meduyak
+            
+          push R6
+          push #20
+          call    #DIV16
+          pop.w   R14			; rem = Remainder(x/y) - no use
+          pop.w   R13	;  Quotient(x/y)
+          ;;;;;mov R13,delta    ;delta = freq/100
+          
+          mov rem, R6
+          add R13,R6       
+          
+          ;rra R13
+          ;add R13,R6       
+          mov rem, R7
+          mov r7, R13
+          ;rra R13
+          push R13
+          push #1000
+          call    #DIV16
+          pop.w   R14			; rem = Remainder(x/y)- no use
+          pop.w   R13	;  Quotient(x/y)
+          add R13,R6    
+          
+          mov rem, R7
+          mov r7, R13
+          ;rra R13
+          push R13
+          push #10000
+          call    #DIV16
+          pop.w   R14			; rem = Remainder(x/y)- no use
+          pop.w   R13	;  Quotient(x/y)
+          add R13,R6             
+          
+          mov r6,division_result
+          
+          
+          
+          push R6
+          inc R6
+          call #dec_converter
+          call #prntscrn_hz
+            
+            
+endst02     push R4
+            ret
+        
+            
+            
+            
+          
+
+;-------------------------------------------------------------           
+;            division - DIV16	
+;-------------------------------------------------------------
+DIV16	  	pop.w R15			; R15 = the caller return address
+		pop.w R14			; R14 = y = Divisor
+		pop.w R13			; R13 = x = Dividend	                 
+                mov     #17,R10			; R10=DIV16_STEP_COUNTER=16+1
+                clr     R12                	; initialize the Quotient register
+                clr     R11		   	; initialize the shift-register {|R11|R13|} Upper Word                 
+DIVL3           rla     R12
+DIVL1           dec     R10
+                jz      DIVL2
+                rla     R13
+                rlc     R11
+                cmp     R14,R11
+                jlo     DIVL3
+                sub     R14,R11
+                setc
+                rlc     R12
+                jmp     DIVL1               
+DIVL2           push.w   R12		   	; push the Quotient into stack
+                push.w   R11		   	; push the Remainder into stack
+		push.w   R15			; push back the caller return address
+                ret	
+
+;------------------------------------------------------------- 
+;            print screen measured freq:
+;-------------------------------------------------------------
+
+prntscrn_mfreq:
+                 
+           ;--print screen --        
+           Lcd_cmd   #0x0C
+           Lcd_cmd   #0x01
+           Lcd_cmd   #0x02
+           Lcd_data  #0x4d    ;print 'm'
+           Lcd_data  #0x65    ;print 'e'
+           Lcd_data  #0x61    ;print 'a'
+           Lcd_data  #0x73    ;print 's'
+           Lcd_data  #0x75    ;print 'u'
+           Lcd_data  #0x72    ;print 'r'
+           Lcd_data  #0x65    ;print 'e'
+           Lcd_data  #0x64    ;print 'd'
+           Lcd_data  #0x20    ;print ' '
+           Lcd_data  #0x46    ;print 'f'
+           Lcd_data  #0x72    ;print 'r'
+           Lcd_data  #0x65    ;print 'e'
+           Lcd_data  #0x71    ;print 'q'
+           Lcd_data  #0x3a    ;print ':'
+           
+           ;---------------------------   
+           
+           
+           ret
+            
+;------------------------------------------------------------- 
+;------------------------------------------------------------
+          ;;;;;hex_to_dec_convertor func;;;;;;;;
+;all the digits are set to 48, which is the value of 0 in ascii;
+ ;------------------------------------------------------------ 
+                        
+                        
+dec_converter           pop R8     ;pc                   
+                        pop hexnum ;our number that we want to convert 
+                        mov.w   #48, thounsands10     ;reseting all the values
+                        mov.w   #48, thounsands  
+                        mov.w   #48, hundreds   
+                        mov.w   #48, tens        
+                        mov.w   #48, ones
+                        
+                        
+thounsands10_check      push.w #10000
+                        push.w hexnum
+                        call #dec_count
+                        pop hexnum
+                        pop R5
+                        add R5, thounsands10
+
+thounsands_check        push #1000
+                        push hexnum
+                        call #dec_count
+                        pop hexnum
+                        pop R5
+                        add R5, thounsands
+                        
+                        
+hundreds_check          push #100
+                        push hexnum
+                        call #dec_count
+                        pop hexnum
+                        pop R5
+                        add R5, hundreds
+
+tens_check              push #10
+                        push hexnum
+                        call #dec_count
+                        pop hexnum
+                        pop R5
+                        add R5, tens
+                        
+                        
+ones_transfer           add.w hexnum, ones
+                        push R8 ;pushing back the pc
+                        ret
+                        
+
+
+dec_count               pop R10  ;PC
+                        pop R11  ;our number
+                        pop R12  ;size of value we count
+                        clr R9
+going_back              cmp.w R12, R11
+                        JN end_loop
+                        SUB.W R12, R11
+                        inc R9
+                        jmp going_back
+end_loop                push R9     ;the divide result with complete value
+                        push R11    ;the remainder
+                        push R10    ;PC
+                        ret
+  
+                
+                
+;---------------------------------------------
+
+
+
+
+;-------------------------------------------------------------           
+;             print a digit to LCD routine 
+;-------------------------------------------------------------                   
+            
+Lcd_digit  pop R13        ;save ret adress
+           pop R11        ;digit to be printer
+           cmp.b #0x0A,R11
+           jge   greatA
+           
+LE9        add.b #0x30,R11  ;if the digit is less than A
+           Lcd_data R11
+           jmp finish
+                       
+greatA     add.b #0x37,R11  ;if the digit is GE than A
+           Lcd_data R11
+           
+finish     push R13
+
+
+           ret
+           
+           
+             ENDMOD    
+             END
